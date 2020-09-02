@@ -285,13 +285,14 @@ class BertNonFusedLayerNorm(nn.Module):
         return self.weight * x + self.bias
 
 try:
-    import apex
+    #import apex
     #apex.amp.register_half_function(apex.normalization.fused_layer_norm, 'FusedLayerNorm')
-    import apex.normalization
-    from apex.normalization.fused_layer_norm import FusedLayerNormAffineFunction
+    #import apex.normalization
+    #from apex.normalization.fused_layer_norm import FusedLayerNormAffineFunction
     #apex.amp.register_float_function(apex.normalization.FusedLayerNorm, 'forward')
     #BertLayerNorm = apex.normalization.FusedLayerNorm
     APEX_IS_AVAILABLE = True
+    APEX_IS_AVAILABLE = False
 except ImportError:
     print("Better speed can be achieved with apex installed from https://www.github.com/nvidia/apex.")
     #BertLayerNorm = BertNonFusedLayerNorm

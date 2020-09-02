@@ -15,12 +15,12 @@
 
 echo "Container nvidia build = " $NVIDIA_BUILD_ID
 
-DATASET=hdf5_lower_case_1_seq_len_128_max_pred_20_masked_lm_prob_0.15_random_seed_12345_dupe_factor_5/books_wiki_en_corpus # change this for other datasets
+DATASET=/tmp/patona_nlp/bert/bert-20200727 #/valid-00001-of-00001.hdf5
 DATA_DIR=${22:-$BERT_PREP_WORKING_DIR/${DATASET}/}
 
-BERT_CONFIG=bert_config.json
-RESULTS_DIR=/results
-CHECKPOINTS_DIR=/results/checkpoints
+BERT_CONFIG=bert_config-base.json
+RESULTS_DIR=/tmp/patona_nlp/output/nvbert-ort-pretraining-patona/46a4abaed05d11ea93c8000d3afc17a5
+CHECKPOINTS_DIR=/tmp/patona_nlp/output/nvbert-ort-pretraining-patona/46a4abaed05d11ea93c8000d3afc17a5
 
 if [ ! -d "$DATA_DIR" ] ; then
    echo "Warning! $DATA_DIR directory missing. Inference cannot start"
@@ -40,11 +40,11 @@ if [ ! -f "$BERT_CONFIG" ] ; then
 fi
 
 eval_batch_size=${1:-14}
-precision=${2:-"fp16"}
-num_gpus=${3:-8}
+precision=${2:-"fp32"}
+num_gpus=${3:-1}
 inference_mode=${4:-"eval"}
 model_checkpoint=${5:-"-1"}
-inference_steps=${6:-"-1"}
+inference_steps=${6:-"5"}
 create_logfile=${7:-"true"}
 seed=${8:-42}
 
@@ -70,14 +70,17 @@ else
 fi
 
 echo $DATA_DIR
-CMD=" /workspace/bert/run_pretraining_inference.py"
+CMD=" $HOME/onnxruntime-training-examples/workspace/BERT/run_pretraining_inference.py"
 CMD+=" --input_dir=$DATA_DIR"
-CMD+=" --ckpt_dir=$CHECKPOINTS_DIR"
+CMD+=" --log_path=/tmp/patona_nlp/test.log"
+CMD+=" --no_cuda"
+#CMD+=" --ckpt_dir=$CHECKPOINTS_DIR"
+CMD+=" --ckpt_path=$CHECKPOINTS_DIR/ckpt_5400_conv.pt"
 CMD+=" --config_file=$BERT_CONFIG"
-CMD+=" --bert_model=bert-large-uncased"
+CMD+=" --bert_model=bert-base-multilingual"
 CMD+=" --eval_batch_size=$eval_batch_size"
-CMD+=" --max_seq_length=512"
-CMD+=" --max_predictions_per_seq=80"
+CMD+=" --max_seq_length=64"
+CMD+=" --max_predictions_per_seq=15"
 CMD+=" --max_steps=$inference_steps"
 CMD+=" --ckpt_step=$model_checkpoint"
 CMD+=" --seed=$seed"

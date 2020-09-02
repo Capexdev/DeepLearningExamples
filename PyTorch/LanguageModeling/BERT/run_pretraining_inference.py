@@ -38,12 +38,12 @@ import math
 import time
 
 from tokenization import BertTokenizer
-from modeling import BertForPreTraining, BertConfig
+from modeling import *#BertForPreTraining, BertConfig
 
 # from fused_adam_local import FusedAdamBert
 from file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 
-from apex.parallel import DistributedDataParallel as DDP
+#from apex.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 import dllogger
 
@@ -168,8 +168,10 @@ def main():
 
     if args.local_rank == -1 or args.no_cuda:
         device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
-        
+        print(device)
+        device = torch.device('cpu')
     else:
+        hoge
         torch.cuda.set_device(args.local_rank)
         device = torch.device("cuda", args.local_rank)
         # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
@@ -204,7 +206,8 @@ def main():
     # Padding for divisibility by 8
     if config.vocab_size % 8 != 0:
         config.vocab_size += 8 - (config.vocab_size % 8)
-    model = BertForPreTraining(config)
+    #model = BertForPreTraining(config)
+    model = BertForMaskedLM(config)
 
     if args.ckpt_dir:
         if args.ckpt_step == -1:
@@ -219,7 +222,10 @@ def main():
     model.load_state_dict(state_dict, strict=False)
 
     if args.fp16:
+        hoge
         model.half() # all parameters and buffers are converted to half precision
+    else:
+        model.float()
     model.to(device)
 
     multi_gpu_training = args.local_rank != -1 and torch.distributed.is_initialized()
@@ -257,7 +263,7 @@ def main():
                         break
                     batch = [t.to(device) for t in batch]
                     input_ids, segment_ids, input_mask, masked_lm_labels, next_sentence_labels = batch#\
-                    loss = model(input_ids=input_ids, token_type_ids=segment_ids, attention_mask=input_mask, masked_lm_labels=masked_lm_labels, next_sentence_label=next_sentence_labels)
+                    loss = model(input_ids=input_ids, token_type_ids=segment_ids, attention_mask=input_mask, masked_lm_labels=masked_lm_labels)#, next_sentence_label=next_sentence_labels)
                     final_loss += loss.item()
 
                     global_step += 1
@@ -272,7 +278,8 @@ def main():
                 dist.all_reduce(final_loss)
                 final_loss /= torch.distributed.get_world_size()
             if (not multi_gpu_training or (multi_gpu_training and torch.distributed.get_rank() == 0)):       
-                dllogger.log(step="Inference Loss", data={"final_loss": final_loss.item()})
+                #dllogger.log(step="Inference Loss", data={"final_loss": final_loss.item()})
+                dllogger.log(step="Inference Loss", data={"final_loss": float(final_loss)})
 
 
         else: # inference
