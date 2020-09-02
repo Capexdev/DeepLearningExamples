@@ -306,7 +306,16 @@ def create_instances_from_document(
 
   return instances
 
-
+def create_training_instances(input_files, tokenizer, max_seq_length,
+                              dupe_factor, short_seq_prob, masked_lm_prob,
+                              max_predictions_per_seq, rng):
+  all_documents = []
+  with open(input_files) as f:
+    for line in f:
+      parts = line.rstrip('\r\n').split()
+      x, y = parts
+      all_documents.append((x, y))
+      
 MaskedLmInstance = collections.namedtuple("MaskedLmInstance",
                                           ["index", "label"])
 
@@ -449,8 +458,15 @@ def main():
 
     args = parser.parse_args()
 
-    tokenizer = BertTokenizer(args.vocab_file, do_lower_case=args.do_lower_case, max_len=512)
-    
+    class MyTokenizer():
+      def __init__(self):
+        self.sp = spm.SentencePieceTokenizer()
+        self.sp.load('/tmp/patona_nlp/sentencepiece/spm_model-20200718.model')
+
+
+    #tokenizer = BertTokenizer(args.vocab_file, do_lower_case=args.do_lower_case, max_len=512)
+    tokenizer = MyTokenizer()
+
     input_files = []
     if os.path.isfile(args.input_file):
       input_files.append(args.input_file)
@@ -460,7 +476,7 @@ def main():
       raise ValueError("{} is not a valid path".format(args.input_file))
 
     rng = random.Random(args.random_seed)
-    instances = create_training_instances(
+    instances = create_training_instances_capex(
         input_files, tokenizer, args.max_seq_length, args.dupe_factor,
         args.short_seq_prob, args.masked_lm_prob, args.max_predictions_per_seq,
         rng)
