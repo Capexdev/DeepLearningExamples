@@ -78,7 +78,7 @@ def create_pretraining_dataset(input_file, max_pred_length, shared_list, args, w
 
 def dataset_padinput(x, padlen=32):
     l = len(x)
-    if l + 1 >= padlen:
+    if l >= padlen:
         x = x[:padlen]
         mask = np.ones_like(x)
         return x, mask
@@ -124,10 +124,10 @@ class pretraining_dataset(Dataset):
 class BertBiRankerCriterion(torch.nn.Module):
     def __init__(self, vocab_size):
         super(BertBiRankerCriterion, self).__init__()
-        self.loss_fn = torch.nn.CrossEntropyLoss(ignore_index=-1)
+        self.loss_fn = torch.nn.BCELoss()
         self.vocab_size = vocab_size
     def forward(self, seq_relationship_score, next_sentence_labels):
-        next_sentence_loss = self.loss_fn(seq_relationship_score.view(-1, 2), next_sentence_labels.view(-1))
+        next_sentence_loss = self.loss_fn(seq_relationship_score, next_sentence_labels)
         return next_sentence_loss
 
 
@@ -402,7 +402,7 @@ def prepare_model_and_optimizer(args, device):
     elif args.n_gpu > 1:
         model = torch.nn.DataParallel(model)
 
-    criterion = BertPretrainingCriterion(config.vocab_size)
+    criterion = BertBiRankerCriterion(config.vocab_size)
 
     return model, optimizer, lr_scheduler, checkpoint, global_step, criterion
 
@@ -526,7 +526,8 @@ def main():
                 remainder = torch.distributed.get_world_size() % num_files
                 data_file = files[(f_start_id*torch.distributed.get_world_size()+torch.distributed.get_rank() + remainder*f_start_id)%num_files]
             else:
-                data_file = files[(f_start_id*torch.distributed.get_world_size()+torch.distributed.get_rank())%num_files]
+                #data_file = files[(f_start_id*torch.distributed.get_world_size()+torch.distributed.get_rank())%num_files]
+                data_file = files[f_start_id%num_files]
 
             previous_file = data_file
 
@@ -547,10 +548,11 @@ def main():
             for f_id in range(f_start_id + 1 , len(files)):
                 
    
-                if torch.distributed.get_world_size() > num_files:
-                    data_file = files[(f_id*torch.distributed.get_world_size()+torch.distributed.get_rank() + remainder*f_id)%num_files]
-                else:
-                    data_file = files[(f_id*torch.distributed.get_world_size()+torch.distributed.get_rank())%num_files]
+                #if torch.distributed.get_world_size() > num_files:
+                #    data_file = files[(f_id*torch.distributed.get_world_size()+torch.distributed.get_rank() + remainder*f_id)%num_files]
+                #else:
+                #    data_file = files[(f_id*torch.distributed.get_world_size()+torch.distributed.get_rank())%num_files]
+                data_file = files[f_id%num_files]
 
                 previous_file = data_file
 
@@ -561,10 +563,10 @@ def main():
 
                     training_steps += 1
                     batch = [t.to(device) for t in batch]
-                    input_ids, segment_ids, input_mask, masked_lm_labels, next_sentence_labels = batch
+                    input1_ids, input1_mask, input2_ids, input2_mask, next_sentence_labels = batch
                     seq_relationship_score = model(
-                        input1_ids=input_ids, input1_attention_mask=input_mask,
-                        input2_ids=input_ids, input2_attention_mask=input_mask)
+                        input1_ids=input1_ids, input1_attention_mask=input1_mask,
+                        input2_ids=input2_ids, input2_attention_mask=input2_mask)
                     loss = criterion(seq_relationship_score, next_sentence_labels)
                     if args.n_gpu > 1:
                         loss = loss.mean()  # mean() to average on multi-gpu.
