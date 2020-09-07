@@ -88,6 +88,19 @@ def dataset_padinput(x, padlen=32):
             np.pad(x, (0, padlen - l), 'constant'),
             np.pad(mask, (0, padlen - l), 'constant'))
 
+def convert_input(input_ids, input_mask, segment_ids):
+    idx = np.where(input_mask & ~segment_ids)
+    input1_ids = input_ids[idx]
+    input1_ids, input1_mask = dataset_padinput(input1_ids)
+
+    k = input_mask & segment_ids
+    k[0] = 1
+    idx = np.where(k)
+    input2_ids = input_ids[idx]
+    input2_ids, input2_mask = dataset_padinput(input2_ids)
+
+    return [input1_ids, input1_mask, input2_ids, input2_mask]
+
 class pretraining_dataset(Dataset):
 
     def __init__(self, input_file, max_pred_length):
@@ -96,30 +109,33 @@ class pretraining_dataset(Dataset):
         f = h5py.File(input_file, "r")
         keys = ['input_ids', 'input_mask', 'segment_ids', 'masked_lm_positions', 'masked_lm_ids',
                 'next_sentence_labels']
-        self.inputs = [np.asarray(f[key][:]) for key in keys]
+        self.inputs = self._convert_inputs([np.asarray(f[key][:]) for key in keys])
         f.close()
+
+    def _convert_inputs(self, inputs):
+        input_ids, input_mask, segment_ids, _, _, next_sentence_labels = inputs
+        idx = np.nonzero(next_sentence_labels == 0)
+        input_ids = input_ids[idx]
+        input_mask = input_mask[idx]
+        segment_ids = segment_ids[idx]
+        inputs = [
+            convert_input(input_ids[i], input_mask[i], segment_ids[i])
+            for i in range(input_ids.shape[0])
+        ]
+
+        input1_ids = np.vstack([input[0] for input in inputs])
+        input1_mask = np.vstack([input[1] for input in inputs])
+        input2_ids = np.vstack([input[2] for input in inputs])
+        input2_mask = np.vstack([input[3] for input in inputs])
+
+        return [input1_ids, input1_mask, input2_ids, input2_mask]
 
     def __len__(self):
         'Denotes the total number of samples'
         return len(self.inputs[0])
 
     def __getitem__(self, index):
-
-        [input_ids, input_mask, segment_ids, masked_lm_positions, masked_lm_ids, next_sentence_labels] = [
-            torch.from_numpy(input[index].astype(np.int64)) if indice < 5 else torch.from_numpy(
-                np.asarray(input[index].astype(np.int64))) for indice, input in enumerate(self.inputs)]
-
-        idx = np.where(input_mask & ~segment_ids)
-        input1_ids = input_ids[idx]
-        input1_ids, input1_mask = dataset_padinput(input1_ids)
-
-        k = input_mask & segment_ids
-        k[0] = 1
-        idx = np.where(k)
-        input2_ids = input_ids[idx]
-        input2_ids, input2_mask = dataset_padinput(input2_ids)
-
-        return [input1_ids, input1_mask, input2_ids, input2_mask, next_sentence_labels]
+        return [input[index] for input in self.inputs]
 
 class BertBiRankerCriterion(torch.nn.Module):
     def __init__(self, vocab_size):
