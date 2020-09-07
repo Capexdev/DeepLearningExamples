@@ -135,14 +135,18 @@ class pretraining_dataset(Dataset):
         return len(self.inputs[0])
 
     def __getitem__(self, index):
-        return [input[index] for input in self.inputs]
+        return [input[index].astype(np.int64) for input in self.inputs]
 
-class BertBiRankerCriterion(torch.nn.Module):
-    def __init__(self, vocab_size):
-        super(BertBiRankerCriterion, self).__init__()
-        self.loss_fn = torch.nn.BCELoss()
-        self.vocab_size = vocab_size
-    def forward(self, seq_relationship_score, next_sentence_labels):
+class BertBiEncoderCriterion(torch.nn.Module):
+    def __init__(self):
+        super(BertBiEncoderCriterion, self).__init__()
+        self.loss_fn = torch.nn.CrossEntropyLoss(ignore_index=-1)
+    def forward(self, input1_embedding, input2_embedding):
+        seq_relationship_score = input1_embedding @ input2_embedding.T
+        next_sentence_labels = torch.arange(input1_embedding.shape[0]).to(seq_relationship_score.device)
+        #print(seq_relationship_score.shape)
+        #print(next_sentence_labels.shape)
+        #print(torch.softmax(seq_relationship_score, dim=1))
         next_sentence_loss = self.loss_fn(seq_relationship_score, next_sentence_labels)
         return next_sentence_loss
 
@@ -418,7 +422,7 @@ def prepare_model_and_optimizer(args, device):
     elif args.n_gpu > 1:
         model = torch.nn.DataParallel(model)
 
-    criterion = BertBiRankerCriterion(config.vocab_size)
+    criterion = BertBiEncoderCriterion()
 
     return model, optimizer, lr_scheduler, checkpoint, global_step, criterion
 
@@ -440,9 +444,10 @@ def take_optimizer_step(args, optimizer, model, overflow_buf, global_step):
         amp_C.multi_tensor_scale(65536,
             overflow_buf,
             [master_grads, allreduced_views],
-            loss_scale / (torch.distributed.get_world_size() * args.gradient_accumulation_steps))
+            #loss_scale / (torch.distributed.get_world_size() * args.gradient_accumulation_steps))
+            loss_scale / args.gradient_accumulation_steps)
         # 3. sum gradient across ranks. Because of the predivision, this averages the gradient
-        torch.distributed.all_reduce(flat_raw)
+        #torch.distributed.all_reduce(flat_raw)
         # 4. combine unscaling and unflattening of allreduced gradient
         overflow_buf.zero_()
         amp_C.multi_tensor_scale(65536,
@@ -579,11 +584,10 @@ def main():
 
                     training_steps += 1
                     batch = [t.to(device) for t in batch]
-                    input1_ids, input1_mask, input2_ids, input2_mask, next_sentence_labels = batch
-                    seq_relationship_score = model(
-                        input1_ids=input1_ids, input1_attention_mask=input1_mask,
-                        input2_ids=input2_ids, input2_attention_mask=input2_mask)
-                    loss = criterion(seq_relationship_score, next_sentence_labels)
+                    input1_ids, input1_mask, input2_ids, input2_mask = batch
+                    input1_embedding = model(input1_ids, torch.zeros_like(input1_ids), input1_mask)
+                    input2_embedding = model(input2_ids, torch.ones_like(input2_ids), input2_mask)
+                    loss = criterion(input1_embedding, input2_embedding)
                     if args.n_gpu > 1:
                         loss = loss.mean()  # mean() to average on multi-gpu.
 

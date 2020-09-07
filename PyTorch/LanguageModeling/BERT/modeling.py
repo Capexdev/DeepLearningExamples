@@ -834,17 +834,9 @@ class BertBiEncoder(BertPreTrainedModel):
         self.bert = BertModel(config)
         self.apply(self.init_bert_weights)
 
-    def forward(self, input1_ids, input1_attention_mask, input2_ids, input2_attention_mask):
-        token_type_ids = torch.zeros_like(input1_ids)
-        _, pooled_output1 = self.bert(input1_ids, token_type_ids, input1_attention_mask)
-        token_type_ids = torch.ones_like(input2_ids)
-        _, pooled_output2 = self.bert(input2_ids, token_type_ids, input2_attention_mask)
-        pooled_output1 = pooled_output1 / torch.sqrt(torch.sum(pooled_output1 ** 2, dim=1, keepdim=True))
-        pooled_output2 = pooled_output2 / torch.sqrt(torch.sum(pooled_output2 ** 2, dim=1, keepdim=True))
-        pooled_output1 = pooled_output1.unsqueeze(1)
-        pooled_output2 = pooled_output2.unsqueeze(2)
-        seq_relationship_score = torch.bmm(pooled_output1, pooled_output2)
-        return seq_relationship_score.to(torch.float32)
+    def forward(self, input_ids, type_ids, attention_mask):
+        _, pooled_output = self.bert(input_ids, type_ids, attention_mask)
+        return pooled_output.to(torch.float32)
 
 
 class BertForPreTraining(BertPreTrainedModel):
