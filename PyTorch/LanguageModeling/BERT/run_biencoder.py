@@ -50,6 +50,7 @@ from apex.parallel.distributed import flat_dist_call
 import amp_C
 import apex_C
 from apex.amp import _amp_state
+from azureml_adapter import set_environment_variables_for_nccl_backend, get_local_rank, get_global_size, get_local_size
 
 import dllogger
 from concurrent.futures import ProcessPoolExecutor
@@ -137,10 +138,44 @@ class pretraining_dataset(Dataset):
     def __getitem__(self, index):
         return [input[index].astype(np.int64) for input in self.inputs]
 
+import torch.nn.functional as F
+from typing import Optional
+
+class FP16SafeCrossEntropy(torch.nn.Module):
+    """
+    FP16-safe cross entropy loss.
+
+    This avoids overflow in the softmax by doing the operation in FP32.
+    """
+
+    def __init__(
+        self,
+        weight: Optional[torch.Tensor] = None,
+        ignore_index: int = -100,
+        reduction: str = 'mean',
+    ):
+        # default ignore_index=-100 mimics pytorch's default in
+        # torch.nn.functional.nll_loss
+        super().__init__()
+        self.register_buffer('weight', weight)  # type: ignore
+        self.ignore_index = ignore_index
+        self.reduction = reduction
+
+    def forward(self, scores, targets):
+        losses = F.nll_loss(
+            F.log_softmax(scores, 1, dtype=torch.float32),
+            targets,
+            weight=self.weight,
+            ignore_index=self.ignore_index,
+            reduction=self.reduction,
+        )
+        return torch.mean(losses)
+
 class BertBiEncoderCriterion(torch.nn.Module):
     def __init__(self):
         super(BertBiEncoderCriterion, self).__init__()
-        self.loss_fn = torch.nn.CrossEntropyLoss(ignore_index=-1)
+        #self.loss_fn = torch.nn.CrossEntropyLoss(ignore_index=-1)
+        self.loss_fn = FP16SafeCrossEntropy(ignore_index=-1)
     def forward(self, input1_embedding, input2_embedding):
         seq_relationship_score = input1_embedding @ input2_embedding.T
         next_sentence_labels = torch.arange(input1_embedding.shape[0]).to(seq_relationship_score.device)
@@ -491,9 +526,22 @@ def main():
 
     args = parse_arguments()
 
+    master_port = 6105
     if args.use_env and 'LOCAL_RANK' in os.environ:
         args.local_rank = int(os.environ['LOCAL_RANK'])
-        
+
+    local_rank = get_local_rank()
+    global_size = get_global_size()
+    local_size = get_local_size()	
+    # TODO use logger	
+    print('local_rank = {}'.format(local_rank))
+    print('global_size = {}'.format(global_size))
+    print('local_size = {}'.format(local_size))
+
+    args.local_rank = local_rank
+
+    set_environment_variables_for_nccl_backend(local_size == global_size, master_port)
+    
     random.seed(args.seed + args.local_rank)
     np.random.seed(args.seed + args.local_rank)
     torch.manual_seed(args.seed + args.local_rank)
