@@ -37,6 +37,7 @@ from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, Datas
 import math
 import multiprocessing
 import modeling
+from onnxruntime.training.checkpoint import experimental_state_dict, experimental_load_state_dict
 
 from utils import format_step
 
@@ -101,7 +102,7 @@ class pretraining_dataset(Dataset):
         masked_lm_labels = torch.ones(input_ids.shape, dtype=torch.long) * -1
         index = self.max_pred_length
         # store number of  masked tokens in index
-        padded_mask_indices = (masked_lm_positions == 0).nonzero()
+        padded_mask_indices = (masked_lm_positions == 0).nonzero(as_tuple=False)
         if len(padded_mask_indices) != 0:
             index = padded_mask_indices[0].item()
         masked_lm_labels[masked_lm_positions[:index]] = masked_lm_ids[:index]
@@ -126,11 +127,11 @@ class BertPretrainingCriterion(torch.nn.Module):
 class bert_model_with_loss(torch.nn.Module):
     def __init__(self, model, loss_fn):
         super(bert_model_with_loss, self).__init__()
-        self.model_ = model
+        self.wrapper_ = model
         self.loss_fn_ = loss_fn
 
     def forward(self, input_ids, segment_ids, input_mask, masked_lm_labels, next_sentence_labels):
-        preds_score, seq_relation_score = self.model_(input_ids, segment_ids, input_mask)
+        preds_score, seq_relation_score = self.wrapper_(input_ids, segment_ids, input_mask)
         return self.loss_fn_(preds_score, seq_relation_score, masked_lm_labels, next_sentence_labels)
 
 def parse_arguments():
@@ -273,7 +274,7 @@ def parse_arguments():
                         default=False,
                         action='store_true',
                         help="Whether to use infiniband on Azure ML submission.")
-    parser.add_argument('--partition_optimizer',
+    parser.add_argument('--deepspeed_zero_stage',
                         default=False,
                         action='store_true',
                         help="Whether ORT will partition optimizer.")
@@ -349,7 +350,11 @@ def prepare_model(args, device):
     else:
         if args.resume_step == -1 and not args.init_checkpoint:
             model_names = [f for f in os.listdir(args.output_dir) if f.endswith(".pt")]
-            args.resume_step = max([int(x.split('.pt')[0].split('_')[1].strip()) for x in model_names])
+            if model_names:
+                args.resume_step = max([int(x.split('.pt')[0].split('_')[1].strip()) for x in model_names])
+            else:
+                global_step = 0
+                return model, checkpoint, global_step
 
         global_step = args.resume_step if not args.init_checkpoint else 0
 
@@ -358,7 +363,7 @@ def prepare_model(args, device):
         else:
             checkpoint = torch.load(args.init_checkpoint, map_location="cpu")
 
-        model.load_state_dict(checkpoint['model'], strict=False)
+        experimental_load_state_dict(model, checkpoint['model'], strict=False)
         
         if args.phase2 and not args.init_checkpoint:
             global_step -= args.phase1_end_step
@@ -396,7 +401,6 @@ def main():
             dllogger.log(step="PARAMETER", data={"batch_size_per_gpu": args.train_batch_size})
             dllogger.log(step="PARAMETER", data={"learning_rate": args.learning_rate})
 
-        model.train()
         most_recent_ckpts_paths = []
         average_loss = 0.0  # averaged loss every args.log_freq steps
         epoch = 0
@@ -517,7 +521,7 @@ def main():
                             else:
                                 output_save_file = os.path.join(args.output_dir, "ckpt_{}.pt".format(global_step + args.phase1_end_step))
                             if args.do_train:
-                                state = {'model': model_to_save.state_dict(),
+                                state = {'model': model_to_save.state_dict() if hasattr(model_to_save, 'state_dict') else experimental_state_dict(model_to_save),
                                          'files': [f_id] + files}
                                 torch.save(state, output_save_file)
 
