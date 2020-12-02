@@ -530,17 +530,18 @@ def main():
     if args.use_env and 'LOCAL_RANK' in os.environ:
         args.local_rank = int(os.environ['LOCAL_RANK'])
 
-    local_rank = get_local_rank()
-    global_size = get_global_size()
-    local_size = get_local_size()	
-    # TODO use logger	
-    print('local_rank = {}'.format(local_rank))
-    print('global_size = {}'.format(global_size))
-    print('local_size = {}'.format(local_size))
+    if 'OMPI_COMM_WORLD_LOCAL_RANK' in os.environ:
+        local_rank = get_local_rank()
+        global_size = get_global_size()
+        local_size = get_local_size()	
+        # TODO use logger	
+        print('local_rank = {}'.format(local_rank))
+        print('global_size = {}'.format(global_size))
+        print('local_size = {}'.format(local_size))
 
-    args.local_rank = local_rank
+        args.local_rank = local_rank
 
-    set_environment_variables_for_nccl_backend(local_size == global_size, master_port)
+        set_environment_variables_for_nccl_backend(local_size == global_size, master_port)
     
     random.seed(args.seed + args.local_rank)
     np.random.seed(args.seed + args.local_rank)
