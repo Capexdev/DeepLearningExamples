@@ -174,10 +174,10 @@ class FP16SafeCrossEntropy(torch.nn.Module):
 class BertBiEncoderCriterion(torch.nn.Module):
     def __init__(self):
         super(BertBiEncoderCriterion, self).__init__()
-        #self.loss_fn = torch.nn.CrossEntropyLoss(ignore_index=-1)
-        self.loss_fn = FP16SafeCrossEntropy(ignore_index=-1)
+        self.loss_fn = torch.nn.CrossEntropyLoss(ignore_index=-1)
+        #self.loss_fn = FP16SafeCrossEntropy(ignore_index=-1)
     def forward(self, input1_embedding, input2_embedding):
-        seq_relationship_score = input1_embedding @ input2_embedding.T
+        seq_relationship_score = input1_embedding.to(torch.float32) @ input2_embedding.T.to(torch.float32)
         next_sentence_labels = torch.arange(input1_embedding.shape[0]).to(seq_relationship_score.device)
         #print(seq_relationship_score.shape)
         #print(next_sentence_labels.shape)
@@ -585,7 +585,10 @@ def main():
                 f_start_id = 0
             else:
                 f_start_id = checkpoint['files'][0]
-                files = checkpoint['files'][1:]
+                files = [os.path.join(args.input_dir, f) for f in os.listdir(args.input_dir) if
+                         os.path.isfile(os.path.join(args.input_dir, f)) and 'training' in f]
+                files.sort()
+                #files = checkpoint['files'][1:]
                 args.resume_from_checkpoint = False
                 num_files = len(files)
 

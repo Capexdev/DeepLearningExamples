@@ -421,6 +421,9 @@ def main():
             else:
                 f_start_id = checkpoint['files'][0]
                 files = checkpoint['files'][1:]
+                files = [os.path.join(args.input_dir, f) for f in os.listdir(args.input_dir) if
+                         os.path.isfile(os.path.join(args.input_dir, f)) and 'training' in f]
+                files.sort()
                 args.resume_from_checkpoint = False
                 num_files = len(files)
 
