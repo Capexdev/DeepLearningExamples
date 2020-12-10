@@ -386,6 +386,22 @@ def prepare_model_and_optimizer(args, device):
     checkpoint = None
     if not args.resume_from_checkpoint:
         global_step = 0
+        if args.init_checkpoint:
+            checkpoint = torch.load(args.init_checkpoint, map_location="cpu")
+            if False:
+                for k, v in checkpoint['model'].items():
+                    print('checkpoint:', k)
+                for p in model.state_dict():
+                    print('model:', p)
+            print('Loading initial parameters...')
+            state = {
+                k.replace('model_.', ''): v
+                for k, v in checkpoint['model'].items()
+                if k.startswith('model_.') and not k.startswith('model_.cls')
+            }
+            model.load_state_dict(state, strict=False)
+            checkpoint = None
+
     else:
         if args.resume_step == -1 and not args.init_checkpoint:
             model_names = [f for f in os.listdir(args.output_dir) if f.endswith(".pt")]
@@ -428,7 +444,7 @@ def prepare_model_and_optimizer(args, device):
 
     model.checkpoint_activations(args.checkpoint_activations)
 
-    if args.resume_from_checkpoint:
+    if args.resume_from_checkpoint and checkpoint:
         if args.phase2 or args.init_checkpoint:
             keys = list(checkpoint['optimizer']['state'].keys())
             #Override hyperparameters from previous checkpoint
@@ -576,7 +592,7 @@ def main():
         # Note: We loop infinitely over epochs, termination is handled via iteration count
         while True:
             thread = None
-            if not args.resume_from_checkpoint or epoch > 0 or (args.phase2 and global_step < 1) or args.init_checkpoint:
+            if not checkpoint or not args.resume_from_checkpoint or epoch > 0 or (args.phase2 and global_step < 1) or args.init_checkpoint:
                 files = [os.path.join(args.input_dir, f) for f in os.listdir(args.input_dir) if
                          os.path.isfile(os.path.join(args.input_dir, f)) and 'training' in f]
                 files.sort()
